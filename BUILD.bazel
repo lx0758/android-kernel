@@ -139,6 +139,7 @@ filegroup(
         "android/abi_gki_aarch64_virtual_device",
         "android/abi_gki_aarch64_vivo",
         "android/abi_gki_aarch64_xiaomi",
+        "android/abi_gki_aarch64_orangepi3b",
     ],
     visibility = ["//visibility:public"],
 )
@@ -724,6 +725,130 @@ copy_to_dist_dir(
     ],
     dist_dir = "out/rockpi4/dist",
     flat = True,
+)
+
+_ORANGEPI3B_MODULE_OUTS = [
+    # keep sorted
+    "drivers/soc/rockchip/io-domain.ko",
+    "drivers/cpufreq/cpufreq-dt.ko",
+    "drivers/clk/clk-rk808.ko",
+    "drivers/thermal/rockchip_thermal.ko",
+    "drivers/dma/pl330.ko",
+    "drivers/regulator/pwm-regulator.ko",
+    "drivers/mmc/host/cqhci.ko",
+    "drivers/regulator/rk808-regulator.ko",
+    "drivers/mmc/host/dw_mmc.ko",
+    "drivers/cpufreq/cpufreq-dt-platdev.ko",
+    "drivers/rtc/rtc-rk808.ko",
+    "drivers/watchdog/dw_wdt.ko",
+    "drivers/phy/rockchip/phy-rockchip-pcie.ko",
+    "drivers/pwm/pwm-rockchip.ko",
+    "drivers/mmc/host/sdhci-of-arasan.ko",
+    "drivers/regulator/fan53555.ko",
+    "drivers/phy/rockchip/phy-rockchip-emmc.ko",
+    "drivers/mmc/host/dw_mmc-rockchip.ko",
+    "drivers/mmc/core/pwrseq_simple.ko",
+    "drivers/cpufreq/tegra20-cpufreq.ko",
+    "drivers/mmc/host/dw_mmc-pltfm.ko",
+    "drivers/i2c/busses/i2c-rk3x.ko",
+    "drivers/gpu/drm/bridge/synopsys/dw-hdmi.ko",
+    "drivers/iio/buffer/kfifo_buf.ko",
+    "drivers/gpu/drm/rockchip/rockchipdrm.ko",
+    "drivers/gpu/drm/display/drm_display_helper.ko",
+    "drivers/gpu/drm/drm_dma_helper.ko",
+    "drivers/iio/buffer/industrialio-triggered-buffer.ko",
+    "drivers/iio/adc/rockchip_saradc.ko",
+    "drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi.ko",
+    "drivers/gpu/drm/bridge/analogix/analogix_dp.ko",
+]
+
+_ORANGEPI3B_WATCHDOG_MODULE_OUTS = [
+    # keep sorted
+]
+
+kernel_build(
+    name = "orangepi3b_no_kgdb",
+    srcs = [":kernel_aarch64_sources"],
+    outs = [
+        "arch/arm64/boot/dts/rockchip/rk3566-orangepi-3b.dtb",
+    ],
+    # Enable mixed build.
+    base_kernel = ":kernel_aarch64",
+    build_config = "build.config.orangepi3b",
+    collect_unstripped_modules = True,
+    kmi_symbol_list = "android/abi_gki_aarch64_orangepi3b",
+    make_goals = [
+        "modules",
+        "rockchip/rk3566-orangepi-3b.dtb",
+    ],
+    module_outs = _ORANGEPI3B_MODULE_OUTS + _ORANGEPI3B_WATCHDOG_MODULE_OUTS,
+    strip_modules = True,
+)
+
+kernel_build(
+    name = "orangepi3b_with_kgdb",
+    srcs = [":kernel_aarch64_sources"],
+    outs = [
+        "arch/arm64/boot/dts/rockchip/rk3566-orangepi-3b.dtb",
+    ],
+    # Enable mixed build.
+    base_kernel = ":kernel_aarch64",
+    build_config = "build.config.orangepi3b",
+    make_goals = [
+        "modules",
+        "rockchip/rk3566-orangepi-3b.dtb",
+    ],
+    module_outs = _ORANGEPI3B_MODULE_OUTS,
+    strip_modules = True,
+)
+
+alias(
+    name = "orangepi3b",
+    actual = select({
+        "//build/kernel/kleaf:kgdb_is_true": "orangepi3b_with_kgdb",
+        "//conditions:default": "orangepi3b_no_kgdb",
+    }),
+)
+
+kernel_abi(
+    name = "orangepi3b_abi",
+    kernel_build = ":orangepi3b",
+    kmi_symbol_list_add_only = False,
+    module_grouping = True,
+)
+
+kernel_modules_install(
+    name = "orangepi3b_modules_install",
+    kernel_build = ":orangepi3b",
+)
+
+merged_kernel_uapi_headers(
+    name = "orangepi3b_merged_kernel_uapi_headers",
+    kernel_build = ":orangepi3b",
+)
+
+kernel_images(
+    name = "orangepi3b_images",
+    build_initramfs = True,
+    kernel_build = ":orangepi3b",
+    kernel_modules_install = ":orangepi3b_modules_install",
+)
+
+copy_to_dist_dir(
+    name = "orangepi3b_dist",
+    data = [
+        ":orangepi3b",
+        ":orangepi3b_images",
+        ":orangepi3b_modules_install",
+        ":orangepi3b_merged_kernel_uapi_headers",
+        # Mixed build: Additional GKI artifacts.
+        ":kernel_aarch64",
+        ":kernel_aarch64_modules",
+        ":kernel_aarch64_additional_artifacts",
+    ],
+    dist_dir = "out/orangepi3b/dist",
+    flat = True,
+    log = "info",
 )
 
 kernel_build(
