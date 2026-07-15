@@ -183,6 +183,7 @@ filegroup(
     name = "aarch64_additional_kmi_symbol_lists",
     srcs = [
         # keep sorted
+        "gki/aarch64/symbols/6xyun",
         "gki/aarch64/symbols/allwinner",
         "gki/aarch64/symbols/amlogic",
         "gki/aarch64/symbols/asr",
@@ -1239,6 +1240,158 @@ pkg_install(
     name = "rockpi4_dist",
     srcs = [":rockpi4_dist_files"],
     destdir = "out/rockpi4/dist",
+)
+
+_ORANGEPI3B_MODULE_OUTS = [
+    # keep sorted
+    "drivers/clk/clk-rk808.ko",
+    "drivers/cpufreq/cpufreq-dt-platdev.ko",
+    "drivers/cpufreq/cpufreq-dt.ko",
+    "drivers/dma/pl330.ko",
+    "drivers/gpu/drm/bridge/analogix/analogix_dp.ko",
+    "drivers/gpu/drm/bridge/synopsys/dw-hdmi.ko",
+    "drivers/gpu/drm/bridge/synopsys/dw-mipi-dsi.ko",
+    "drivers/gpu/drm/display/drm_display_helper.ko",
+    "drivers/gpu/drm/drm_dma_helper.ko",
+    "drivers/gpu/drm/rockchip/rockchipdrm.ko",
+    "drivers/i2c/busses/i2c-rk3x.ko",
+    "drivers/iio/adc/rockchip_saradc.ko",
+    "drivers/iio/buffer/industrialio-triggered-buffer.ko",
+    "drivers/iio/buffer/kfifo_buf.ko",
+    "drivers/input/misc/rk805-pwrkey.ko",
+    "drivers/media/platform/rockchip/rga/rockchip-rga.ko",
+    "drivers/mmc/core/pwrseq_simple.ko",
+    "drivers/mmc/host/cqhci.ko",
+    "drivers/mmc/host/dw_mmc-pltfm.ko",
+    "drivers/mmc/host/dw_mmc-rockchip.ko",
+    "drivers/mmc/host/dw_mmc.ko",
+    "drivers/mmc/host/sdhci-of-arasan.ko",
+    "drivers/mmc/host/sdhci-of-dwcmshc.ko",
+    "drivers/net/ethernet/stmicro/stmmac/dwmac-generic.ko",
+    "drivers/net/ethernet/stmicro/stmmac/dwmac-rk.ko",
+    "drivers/net/ethernet/stmicro/stmmac/stmmac-platform.ko",
+    "drivers/net/ethernet/stmicro/stmmac/stmmac.ko",
+    "drivers/net/pcs/pcs_xpcs.ko",
+    "drivers/nvmem/nvmem-rockchip-otp.ko",
+    "drivers/nvmem/nvmem_rockchip_efuse.ko",
+    "drivers/phy/rockchip/phy-rockchip-emmc.ko",
+    "drivers/phy/rockchip/phy-rockchip-inno-usb2.ko",
+    "drivers/phy/rockchip/phy-rockchip-naneng-combphy.ko",
+    "drivers/phy/rockchip/phy-rockchip-pcie.ko",
+    "drivers/pwm/pwm-rockchip.ko",
+    "drivers/regulator/fan53555.ko",
+    "drivers/regulator/pwm-regulator.ko",
+    "drivers/regulator/rk808-regulator.ko",
+    "drivers/rtc/rtc-rk808.ko",
+    "drivers/soc/rockchip/io-domain.ko",
+    "drivers/spi/spi-rockchip-sfc.ko",
+    "drivers/spi/spi-rockchip.ko",
+    "drivers/thermal/rockchip_thermal.ko",
+    "drivers/video/backlight/pwm_bl.ko",
+    "drivers/watchdog/dw_wdt.ko",
+    "sound/soc/rockchip/snd-soc-rockchip-i2s-tdm.ko",
+    "sound/soc/rockchip/snd-soc-rockchip-i2s.ko",
+    "sound/soc/rockchip/snd-soc-rockchip-pdm.ko",
+    "sound/soc/rockchip/snd-soc-rockchip-spdif.ko",
+]
+
+_ORANGEPI3B_WATCHDOG_MODULE_OUTS = [
+    # keep sorted
+]
+
+kernel_build(
+    name = "orangepi3b_no_kgdb",
+    srcs = [":kernel_aarch64_sources"],
+    outs = [
+        "Image",
+        "System.map",
+        "arch/arm64/boot/dts/rockchip/rk3566-orangepi-3b-v1.1.dtb",
+        "arch/arm64/boot/dts/rockchip/rk3566-orangepi-3b-v2.1.dtb",
+        "modules.builtin",
+        "modules.builtin.modinfo",
+        "vmlinux",
+        "vmlinux.symvers",
+    ],
+    arch = "arm64",
+    build_config = "build.config.orangepi3b",
+    defconfig = "arch/arm64/configs/gki_defconfig",
+    kmi_symbol_list_strict_mode = False,
+    make_goals = [
+        "Image",
+        "modules",
+        "rockchip/rk3566-orangepi-3b-v1.1.dtb",
+        "rockchip/rk3566-orangepi-3b-v2.1.dtb",
+    ],
+    makefile = ":Makefile",
+    module_outs = get_gki_modules_list("arm64") + get_kunit_modules_list("arm64") + _ORANGEPI3B_MODULE_OUTS + _ORANGEPI3B_WATCHDOG_MODULE_OUTS,
+    pre_defconfig_fragments = ["arch/arm64/configs/orangepi3b_gki.fragment"],
+    trim_nonlisted_kmi = False,
+    visibility = ["//visibility:private"],
+)
+
+kernel_build(
+    name = "orangepi3b_with_kgdb",
+    srcs = [":kernel_aarch64_sources"],
+    outs = [
+        "Image",
+        "System.map",
+        "arch/arm64/boot/dts/rockchip/rk3566-orangepi-3b-v1.1.dtb",
+        "arch/arm64/boot/dts/rockchip/rk3566-orangepi-3b-v2.1.dtb",
+        "modules.builtin",
+        "modules.builtin.modinfo",
+        "vmlinux",
+        "vmlinux.symvers",
+    ],
+    arch = "arm64",
+    build_config = "build.config.orangepi3b",
+    kmi_symbol_list_strict_mode = False,
+    make_goals = [
+        "Image",
+        "modules",
+        "rockchip/rk3566-orangepi-3b-v1.1.dtb",
+        "rockchip/rk3566-orangepi-3b-v2.1.dtb",
+    ],
+    makefile = ":Makefile",
+    module_outs = get_gki_modules_list("arm64") + get_kunit_modules_list("arm64") + _ORANGEPI3B_MODULE_OUTS,
+    trim_nonlisted_kmi = False,
+    visibility = ["//visibility:private"],
+)
+
+alias(
+    name = "orangepi3b",
+    actual = select({
+        "//build/kernel/kleaf:kgdb_is_true": "orangepi3b_with_kgdb",
+        "//conditions:default": "orangepi3b_no_kgdb",
+    }),
+)
+
+kernel_modules_install(
+    name = "orangepi3b_modules_install",
+    kernel_build = ":orangepi3b",
+)
+
+initramfs(
+    name = "orangepi3b_initramfs",
+    kernel_modules_install = ":orangepi3b_modules_install",
+    ramdisk_compression = "lz4",
+    visibility = ["//visibility:private"],
+)
+
+pkg_files(
+    name = "orangepi3b_dist_files",
+    srcs = [
+        ":orangepi3b",
+        ":orangepi3b_initramfs",
+        ":orangepi3b_modules_install",
+    ],
+    strip_prefix = strip_prefix.files_only(),
+    visibility = ["//visibility:private"],
+)
+
+pkg_install(
+    name = "orangepi3b_dist",
+    srcs = [":orangepi3b_dist_files"],
+    destdir = "out/orangepi3b/dist",
 )
 
 _AMLOGIC_MODULE_OUTS = [
