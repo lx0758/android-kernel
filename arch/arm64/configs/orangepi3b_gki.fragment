@@ -103,6 +103,15 @@ CONFIG_ROCKCHIP_DW_HDMI=y
 CONFIG_ROCKCHIP_DW_MIPI_DSI=y
 CONFIG_BACKLIGHT_PWM=m
 
+# GPU
+# Panfrost 是 tristate，必须 "=m" 才会成为板级模块；它 select 的
+# CONFIG_DRM_SCHED 也是 tristate，会跟着变成模块，产物名是 gpu-sched.ko
+# （drivers/gpu/drm/scheduler/Makefile: obj-$(CONFIG_DRM_SCHED) += gpu-sched.o），
+# 所以这里不单独写 DRM_SCHED。其余被 select 的 IOMMU_IO_PGTABLE_LPAE、
+# DRM_GEM_SHMEM_HELPER、DEVFREQ_GOV_SIMPLE_ONDEMAND、WANT_DEV_COREDUMP
+# 在 gki_defconfig 里已是内建。
+CONFIG_DRM_PANFROST=m
+
 # Ethernet
 CONFIG_STMMAC_ETH=m
 CONFIG_STMMAC_PLATFORM=m
