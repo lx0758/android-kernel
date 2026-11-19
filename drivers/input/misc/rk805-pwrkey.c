@@ -14,6 +14,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
 
 static irqreturn_t pwrkey_fall_irq(int irq, void *_pwr)
 {
@@ -90,10 +91,50 @@ static int rk805_pwrkey_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int rk805_pwrkey_suspend(struct device *dev)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	int irq;
+
+	if (!device_may_wakeup(dev))
+		return 0;
+
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0)
+		return 0;
+
+	if (enable_irq_wake(irq))
+		dev_warn(dev, "failed to enable wake irq %d\n", irq);
+
+	return 0;
+}
+
+static int rk805_pwrkey_resume(struct device *dev)
+{
+	struct platform_device *pdev = to_platform_device(dev);
+	int irq;
+
+	if (!device_may_wakeup(dev))
+		return 0;
+
+	irq = platform_get_irq(pdev, 0);
+	if (irq < 0)
+		return 0;
+
+	if (disable_irq_wake(irq))
+		dev_warn(dev, "failed to disable wake irq %d\n", irq);
+
+	return 0;
+}
+
+static SIMPLE_DEV_PM_OPS(rk805_pwrkey_pm_ops,
+			 rk805_pwrkey_suspend, rk805_pwrkey_resume);
+
 static struct platform_driver rk805_pwrkey_driver = {
 	.probe	= rk805_pwrkey_probe,
 	.driver	= {
 		.name = "rk805-pwrkey",
+		.pm = &rk805_pwrkey_pm_ops,
 	},
 };
 module_platform_driver(rk805_pwrkey_driver);

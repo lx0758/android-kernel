@@ -1780,7 +1780,16 @@ static int rockchip_thermal_probe(struct platform_device *pdev)
 
 	for (i = 0; i < thermal->chip->chn_num; i++) {
 		rockchip_thermal_toggle_sensor(&thermal->sensors[i], true);
-		error = thermal_add_hwmon_sysfs(thermal->sensors[i].tzd);
+		/*
+		 * Use the devm variant instead of thermal_add_hwmon_sysfs():
+		 * GKI enables CONFIG_TRIM_UNUSED_KSYMS and only exports
+		 * devm_thermal_add_hwmon_sysfs(), so the raw add/remove pair is
+		 * undefined when this driver is built as a board module (modpost
+		 * failure). The devm cleanup also runs before the zone's own
+		 * devres, which keeps the teardown order correct.
+		 */
+		error = devm_thermal_add_hwmon_sysfs(&pdev->dev,
+						     thermal->sensors[i].tzd);
 		if (error)
 			dev_warn(&pdev->dev,
 				 "failed to register sensor %d with hwmon: %d\n",
@@ -1800,7 +1809,7 @@ static void rockchip_thermal_remove(struct platform_device *pdev)
 	for (i = 0; i < thermal->chip->chn_num; i++) {
 		struct rockchip_thermal_sensor *sensor = &thermal->sensors[i];
 
-		thermal_remove_hwmon_sysfs(sensor->tzd);
+		/* hwmon sysfs is released by devres; no explicit removal here. */
 		rockchip_thermal_toggle_sensor(sensor, false);
 	}
 
