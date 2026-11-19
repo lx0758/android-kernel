@@ -57,6 +57,7 @@
 		pinctrl-0 = <&work_led>;
 
 		led-0 {
+			label = "android-status";
 			color = <LED_COLOR_ID_GREEN>;
 			default-state = "on";
 			function = LED_FUNCTION_HEARTBEAT;

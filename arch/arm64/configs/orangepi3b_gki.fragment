@@ -35,8 +35,17 @@
 
 # Core features
 CONFIG_COMMON_CLK_RK808=m
-# CONFIG_CPUFREQ_DT_PLATDEV is a bool symbol and is selected by
-# CONFIG_CPUFREQ_DT; it must not be set to "m" here.
+# CONFIG_CPUFREQ_DT 是模块，驱动本体随 vendor_boot 加载；但 "cpufreq-dt"
+# 平台设备由 CONFIG_CPUFREQ_DT_PLATDEV 创建，该符号是 bool，在本 mixed build
+# 里板级 "=y" 会被丢弃（板级没有 vmlinux），所以它必须落在 gki_defconfig。
+# 缺它时 cpufreq-dt.ko 能加载却没有任何平台设备，
+# /sys/devices/system/cpu/cpufreq 为空，Power HAL 的模式控制全部静默失效。
+# 另：CPUFREQ_DT_PLATDEV 是 bool，不能在这里写 "=m"。
+#
+# CPU 时钟来自 SCMI（rk356x-base.dtsi: clocks = <&scmi_clk 0>），
+# 因此 CONFIG_COMMON_CLK_SCMI 也必须随 GKI 编入（已在 gki_defconfig 打开）。
+# 缺它时 clk_get() 永久返回 -EPROBE_DEFER：cpufreq-dt 平台设备与驱动都在，
+# 但永远不绑定，/sys/devices/system/cpu/cpufreq 为空且没有任何报错。
 CONFIG_CPUFREQ_DT=m
 CONFIG_MFD_RK8XX=m
 CONFIG_MFD_RK8XX_I2C=m
@@ -52,6 +61,10 @@ CONFIG_REGULATOR_RK808=m
 CONFIG_NVMEM_ROCKCHIP_EFUSE=m
 CONFIG_NVMEM_ROCKCHIP_OTP=m
 CONFIG_ROCKCHIP_IODOMAIN=m
+# NOTE: rockchip_thermal uses devm_thermal_add_hwmon_sysfs(); that symbol is
+# registered in gki/aarch64/symbols/6xyun because GKI trims unused ksyms.
+# See the comment in drivers/thermal/rockchip_thermal.c for details.
+CONFIG_ROCKCHIP_THERMAL=m
 CONFIG_ROCKCHIP_SARADC=m
 CONFIG_ROCKCHIP_VOP2=y
 
@@ -64,6 +77,12 @@ CONFIG_I2C_RK3X=m
 # Real-time clock
 CONFIG_RTC_DRV_RK808=m
 CONFIG_INPUT_RK805_PWRKEY=m
+
+# LED
+# heartbeat trigger 依赖 avenrun 与 led_set_brightness_nosleep，两者在 GKI
+# 的 KMI 白名单中不可用，无法作为模块链接；heartbeat 必须内建到 GKI
+# （见 gki_defconfig），板级只保留 GPIO LED 模块。
+CONFIG_LEDS_GPIO=m
 
 # SPI
 CONFIG_SPI_ROCKCHIP=m
@@ -89,6 +108,9 @@ CONFIG_STMMAC_ETH=m
 CONFIG_STMMAC_PLATFORM=m
 CONFIG_DWMAC_GENERIC=m
 CONFIG_DWMAC_ROCKCHIP=m
+# OrangePi 3B v1.1 板载 PHY 为 Motorcomm YT8531C（v2.1 才是其他方案），
+# 缺少该驱动时 dwmac-rk 的 phy_connect 会失败，网卡不会注册。
+CONFIG_MOTORCOMM_PHY=m
 # CONFIG_DWMAC_SUN8I is not set
 # CONFIG_DWMAC_SUNXI is not set
 # CONFIG_DWMAC_IPQ806X is not set

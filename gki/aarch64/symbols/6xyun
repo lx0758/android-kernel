@@ -825,6 +825,11 @@
   iio_trigger_notify_done
 
 # required by rockchip_thermal.ko
+# NOTE: the driver uses devm_thermal_add_hwmon_sysfs().  GKI trims unused
+# exported symbols, so the symbol must be listed here to keep it exported and
+# to satisfy the board KMI symbol-list check.  See rockchip_thermal.c for why
+# the raw thermal_{add,remove}_hwmon_sysfs() pair cannot be used.
+  devm_thermal_add_hwmon_sysfs
   devm_thermal_of_zone_register
   nvmem_cell_put
   nvmem_cell_read
@@ -1262,3 +1267,42 @@
   iommu_get_domain_for_dev
   vfree
   vmalloc_noprof
+
+# added for leds-gpio (GPIO LED)
+  __dev_fwnode_const
+  device_get_next_child_node
+  devm_fwnode_gpiod_get_index
+  devm_gpio_request_one
+  devm_led_classdev_register_ext
+  devm_pinctrl_put
+  fwnode_get_child_node_count
+  gpio_to_desc
+  gpiod_cansleep
+  gpiod_set_consumer_name
+  gpiod_toggle_active_low
+  led_init_default_state_get
+
+# added for motorcomm (MDIO/PHY)
+  __genphy_config_aneg
+  __mdiobus_modify_changed
+  __mdiobus_read
+  __mdiobus_write
+  __phy_modify
+  genphy_c45_pma_read_ext_abilities
+  genphy_c45_read_lpa
+  genphy_read_abilities
+  genphy_read_status
+  genphy_resume
+  genphy_suspend
+  mdiobus_read
+  phy_basic_ports_array
+  phy_drivers_register
+  phy_drivers_unregister
+  phy_modify
+  phy_resolve_aneg_pause
+  phy_restore_page
+  phy_select_page
+
+# bitmap helpers
+  __bitmap_andnot
+  _find_first_bit
