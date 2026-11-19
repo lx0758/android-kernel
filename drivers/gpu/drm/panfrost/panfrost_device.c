@@ -415,22 +415,29 @@ static int panfrost_device_runtime_resume(struct device *dev)
 
 	if (pfdev->comp->pm_features & BIT(GPU_PM_RT)) {
 		ret = reset_control_deassert(pfdev->rstc);
-		if (ret)
+		if (ret) {
+			dev_err(dev, "failed to deassert GPU reset: %d\n", ret);
 			return ret;
+		}
 
 		ret = clk_enable(pfdev->clock);
-		if (ret)
+		if (ret) {
+			dev_err(dev, "failed to enable GPU clock: %d\n", ret);
 			goto err_clk;
+		}
 
 		if (pfdev->bus_clock) {
 			ret = clk_enable(pfdev->bus_clock);
-			if (ret)
+			if (ret) {
+				dev_err(dev, "failed to enable GPU bus clock: %d\n", ret);
 				goto err_bus_clk;
+			}
 		}
 	}
 
 	panfrost_device_reset(pfdev);
 	panfrost_devfreq_resume(pfdev);
+	panfrost_job_resume_timeout(pfdev);
 
 	return 0;
 
@@ -450,6 +457,7 @@ static int panfrost_device_runtime_suspend(struct device *dev)
 	if (!panfrost_job_is_idle(pfdev))
 		return -EBUSY;
 
+	panfrost_job_suspend_timeout(pfdev);
 	panfrost_devfreq_suspend(pfdev);
 	panfrost_job_suspend_irq(pfdev);
 	panfrost_mmu_suspend_irq(pfdev);
@@ -518,9 +526,18 @@ static int panfrost_device_suspend(struct device *dev)
 	struct panfrost_device *pfdev = dev_get_drvdata(dev);
 	int ret;
 
+	/*
+	 * DRM scheduler timeouts must not run while the GPU is powered off.
+	 * Pause them across system sleep; they are resumed by the runtime
+	 * resume callback once the GPU is actually powered back on.
+	 */
+	panfrost_job_suspend_timeout(pfdev);
+
 	ret = pm_runtime_force_suspend(dev);
-	if (ret)
+	if (ret) {
+		panfrost_job_resume_timeout(pfdev);
 		return ret;
+	}
 
 	if (pfdev->comp->pm_features & BIT(GPU_PM_CLK_DIS)) {
 		if (pfdev->bus_clock)

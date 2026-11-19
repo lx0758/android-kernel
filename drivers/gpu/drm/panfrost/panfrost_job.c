@@ -2,9 +2,11 @@
 /* Copyright 2019 Linaro, Ltd, Rob Herring <robh@kernel.org> */
 /* Copyright 2019 Collabora ltd. */
 #include <linux/delay.h>
+#include <linux/err.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
+#include <linux/jiffies.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/dma-resv.h>
@@ -31,6 +33,9 @@ struct panfrost_queue_state {
 	struct drm_gpu_scheduler sched;
 	u64 fence_context;
 	u64 emit_seqno;
+	unsigned long remaining_time;
+	long saved_timeout;
+	bool timeout_suspended;
 };
 
 struct panfrost_job_slot {
@@ -195,7 +200,7 @@ panfrost_enqueue_job(struct panfrost_device *pfdev, int slot,
 	return 1;
 }
 
-static void panfrost_job_hw_submit(struct panfrost_job *job, int js)
+static int panfrost_job_hw_submit(struct panfrost_job *job, int js)
 {
 	struct panfrost_device *pfdev = job->pfdev;
 	unsigned int subslot;
@@ -203,14 +208,26 @@ static void panfrost_job_hw_submit(struct panfrost_job *job, int js)
 	u64 jc_head = job->jc;
 	int ret;
 
+	/*
+	 * pm_runtime_get_sync() keeps the usage counter elevated even when
+	 * runtime resume fails. During system suspend/resume runtime PM is
+	 * temporarily disabled, so a racing submission would otherwise leak
+	 * the reference and leave the job stuck in the scheduler. That job
+	 * later times out and panfrost_job_timedout() reads GPU registers
+	 * while the device is still powered off, causing an external abort.
+	 */
+	ret = pm_runtime_resume_and_get(pfdev->dev);
+	if (ret < 0) {
+		dev_err(pfdev->dev, "failed to resume GPU: %d\n", ret);
+		return ret;
+	}
+
 	panfrost_devfreq_record_busy(&pfdev->pfdevfreq);
 
-	ret = pm_runtime_get_sync(pfdev->dev);
-	if (ret < 0)
-		return;
-
 	if (WARN_ON(job_read(pfdev, JS_COMMAND_NEXT(js)))) {
-		return;
+		panfrost_devfreq_record_idle(&pfdev->pfdevfreq);
+		pm_runtime_put_autosuspend(pfdev->dev);
+		return -EBUSY;
 	}
 
 	cfg = panfrost_mmu_as_get(pfdev, job->mmu);
@@ -261,6 +278,8 @@ static void panfrost_job_hw_submit(struct panfrost_job *job, int js)
 			job, js, subslot, jc_head, cfg & 0xf);
 	}
 	spin_unlock(&pfdev->js->job_lock);
+
+	return 0;
 }
 
 static int panfrost_acquire_object_fences(struct drm_gem_object **bos,
@@ -382,6 +401,7 @@ static struct dma_fence *panfrost_job_run(struct drm_sched_job *sched_job)
 	struct panfrost_device *pfdev = job->pfdev;
 	int slot = panfrost_job_get_slot(job);
 	struct dma_fence *fence = NULL;
+	int ret;
 
 	if (unlikely(job->base.s_fence->finished.error))
 		return NULL;
@@ -400,7 +420,11 @@ static struct dma_fence *panfrost_job_run(struct drm_sched_job *sched_job)
 		dma_fence_put(job->done_fence);
 	job->done_fence = dma_fence_get(fence);
 
-	panfrost_job_hw_submit(job, slot);
+	ret = panfrost_job_hw_submit(job, slot);
+	if (ret) {
+		dma_fence_put(fence);
+		return ERR_PTR(ret);
+	}
 
 	return fence;
 }
@@ -875,7 +899,7 @@ int panfrost_job_init(struct panfrost_device *pfdev)
 		return ret;
 	}
 
-	pfdev->reset.wq = alloc_ordered_workqueue("panfrost-reset", 0);
+	pfdev->reset.wq = alloc_ordered_workqueue("panfrost-reset", WQ_FREEZABLE);
 	if (!pfdev->reset.wq)
 		return -ENOMEM;
 	args.timeout_wq = pfdev->reset.wq;
@@ -994,4 +1018,41 @@ int panfrost_job_is_idle(struct panfrost_device *pfdev)
 	}
 
 	return true;
+}
+
+void panfrost_job_suspend_timeout(struct panfrost_device *pfdev)
+{
+	struct panfrost_job_slot *js = pfdev->js;
+	int i;
+
+	for (i = 0; i < NUM_JOB_SLOTS; i++) {
+		struct panfrost_queue_state *queue = &js->queue[i];
+
+		if (queue->timeout_suspended)
+			continue;
+
+		queue->saved_timeout = queue->sched.timeout;
+		queue->remaining_time = drm_sched_suspend_timeout(&queue->sched);
+		if (queue->remaining_time == (unsigned long)MAX_SCHEDULE_TIMEOUT)
+			queue->remaining_time = queue->saved_timeout;
+		queue->sched.timeout = MAX_SCHEDULE_TIMEOUT;
+		queue->timeout_suspended = true;
+	}
+}
+
+void panfrost_job_resume_timeout(struct panfrost_device *pfdev)
+{
+	struct panfrost_job_slot *js = pfdev->js;
+	int i;
+
+	for (i = 0; i < NUM_JOB_SLOTS; i++) {
+		struct panfrost_queue_state *queue = &js->queue[i];
+
+		if (!queue->timeout_suspended)
+			continue;
+
+		queue->sched.timeout = queue->saved_timeout;
+		drm_sched_resume_timeout(&queue->sched, queue->remaining_time);
+		queue->timeout_suspended = false;
+	}
 }
