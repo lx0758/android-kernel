@@ -196,6 +196,7 @@ void rkvenc_vepu541_h264_build(const struct rkvenc_frame *f,
 	rkvenc_img_l1(img, RKVENC_ENC_PIC, pic);
 
 	rkvenc_img_l1(img, RKVENC_DTRNS_CFG, RKVENC_DTRNS_CFG_DSPR_OTSD);
+	rkvenc_img_l1(img, RKVENC_SLI_CRS, RKVENC_SLI_CRS_EN);
 
 	rkvenc_img_l1(img, RKVENC_KLUT_OFST, f->intra ? 0 : 3);
 	for (i = 0; i < RKVENC_KLUT_WORDS; i++)

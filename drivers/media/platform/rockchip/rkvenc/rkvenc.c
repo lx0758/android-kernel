@@ -14,11 +14,13 @@
 #include <linux/clk.h>
 #include <linux/completion.h>
 #include <linux/delay.h>
+#include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/reset.h>
+#include <linux/string.h>
 
 #include <media/v4l2-mem2mem.h>
 #include <media/videobuf2-dma-contig.h>
@@ -185,6 +187,42 @@ static irqreturn_t rkvenc_irq(int irq, void *priv)
 	return IRQ_WAKE_THREAD;
 }
 
+/*
+ * dst > src 且区间重叠，从尾部往前拷。
+ * 这里不用 memmove()：rockchip-rkvenc.ko 受 GKI KMI 白名单限制，设备符号表
+ * 里有 memcpy/memset 但没有 memmove，未签名模块在运行时用不了它，编译期的
+ * KernelBuildCheckSymbolViolations 也会直接报错。
+ */
+static void rkvenc_shift_right(u8 *dst, const u8 *src, u32 len)
+{
+	while (len--)
+		dst[len] = src[len];
+}
+
+static void rkvenc_prepend_headers(struct rkvenc_ctx *ctx,
+				   struct vb2_v4l2_buffer *dst, u32 bytes)
+{
+	struct device *dev = ctx->dev->dev;
+	struct vb2_buffer *vb = &dst->vb2_buf;
+	u32 size = vb2_plane_size(vb, 0);
+	u32 total = ctx->cur_prepend + bytes;
+	u8 *vaddr = vb2_plane_vaddr(vb, 0);
+
+	if (!vaddr || total > size) {
+		dev_warn_once(dev,
+			      "capture buffer too small for the parameter sets\n");
+		ctx->cur_prepend = 0;
+		return;
+	}
+
+	rkvenc_shift_right(vaddr + ctx->cur_prepend, vaddr, bytes);
+	memcpy(vaddr, ctx->hdr, ctx->cur_prepend);
+	/* 让 CPU 的写入对其它观察者（客户端映射）可见。 */
+	dma_sync_single_for_device(dev,
+				   vb2_dma_contig_plane_dma_addr(vb, 0),
+				   total, DMA_TO_DEVICE);
+}
+
 static void rkvenc_finish_job(struct rkvenc_dev *dev, struct rkvenc_ctx *ctx,
 			      enum vb2_buffer_state state)
 {
@@ -199,6 +237,10 @@ static void rkvenc_finish_job(struct rkvenc_dev *dev, struct rkvenc_ctx *ctx,
 		src = v4l2_m2m_next_src_buf(ctx->m2m_ctx);
 		dst = v4l2_m2m_next_dst_buf(ctx->m2m_ctx);
 
+		/* 参数集必须在硬件写完码流之后再拼（见 rkvenc_device_run）。 */
+		if (dst && ctx->cur_prepend)
+			rkvenc_prepend_headers(ctx, dst, bytes);
+
 		payload = ctx->cur_prepend + bytes;
 		frame_type = ctx->cur_intra ? 0 : 1;
 		if (ctx->qp_blocks)
@@ -209,7 +251,7 @@ static void rkvenc_finish_job(struct rkvenc_dev *dev, struct rkvenc_ctx *ctx,
 		if (dst) {
 			vb2_set_plane_payload(&dst->vb2_buf, 0, payload);
 			if (src)
-				v4l2_m2m_buf_copy_metadata(src, dst);
+				v4l2_m2m_buf_copy_metadata(src, dst, false);
 			dst->flags |= ctx->cur_intra ? V4L2_BUF_FLAG_KEYFRAME
 						     : V4L2_BUF_FLAG_PFRAME;
 		}

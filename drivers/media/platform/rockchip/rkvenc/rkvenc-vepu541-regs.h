@@ -60,12 +60,39 @@
 #define   RKVENC_DTRNS_CFG_DSPR_OTSD		BIT(7)
 
 #define RKVENC_SRC_FMT				0x044
+#define   RKVENC_SRC_FMT_RBUV_SWAP		BIT(1)
 #define   RKVENC_SRC_FMT_CFMT			GENMASK(5, 2)
+#define   RKVENC_SRC_FMT_CFMT_BGRA8888		0
 #define   RKVENC_SRC_FMT_CFMT_NV12		6
 #define   RKVENC_SRC_FMT_RANGE			BIT(6)
 
+/* RGB -> YUV 转换系数（仅 RGB 输入时有效）。 */
+#define RKVENC_CSC_WGT_Y			0x048
+#define   RKVENC_CSC_WGT_B2Y			GENMASK(8, 0)
+#define   RKVENC_CSC_WGT_G2Y			GENMASK(17, 9)
+#define   RKVENC_CSC_WGT_R2Y			GENMASK(26, 18)
+#define RKVENC_CSC_WGT_U			0x04c
+#define   RKVENC_CSC_WGT_B2U			GENMASK(8, 0)
+#define   RKVENC_CSC_WGT_G2U			GENMASK(17, 9)
+#define   RKVENC_CSC_WGT_R2U			GENMASK(26, 18)
+#define RKVENC_CSC_WGT_V			0x050
+#define   RKVENC_CSC_WGT_B2V			GENMASK(8, 0)
+#define   RKVENC_CSC_WGT_G2V			GENMASK(17, 9)
+#define   RKVENC_CSC_WGT_R2V			GENMASK(26, 18)
+#define RKVENC_CSC_OFST				0x054
+#define   RKVENC_CSC_OFST_V			GENMASK(7, 0)
+#define   RKVENC_CSC_OFST_U			GENMASK(15, 8)
+#define   RKVENC_CSC_OFST_Y			GENMASK(20, 16)
+
 #define RKVENC_SRC_PROC				0x058
 #define   RKVENC_SRC_PROC_TXA_EN		BIT(29)
+
+/*
+ * Slice cut cross lines enable（H.264 only）。MPP 在公共初始化里无条件
+ * 置 1；驱动此前没有写，寄存器保持 0。
+ */
+#define RKVENC_SLI_CRS				0x05c
+#define   RKVENC_SLI_CRS_EN			BIT(31)
 
 #define RKVENC_KLUT_OFST			0x064
 #define RKVENC_KLUT_WGT(n)			(0x068 + 4 * (n))

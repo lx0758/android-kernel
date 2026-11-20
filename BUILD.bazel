@@ -1186,6 +1186,7 @@ _ORANGEPI3B_MODULE_OUTS = [
     "drivers/input/misc/rk805-pwrkey.ko",
     "drivers/leds/leds-gpio.ko",
     "drivers/media/platform/rockchip/rga/rockchip-rga.ko",
+    "drivers/media/platform/rockchip/rkvenc/rockchip-rkvenc.ko",
     "drivers/mfd/rk8xx-core.ko",
     "drivers/mfd/rk8xx-i2c.ko",
     "drivers/mmc/core/pwrseq_simple.ko",

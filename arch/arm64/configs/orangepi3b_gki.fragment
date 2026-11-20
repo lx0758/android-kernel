@@ -136,6 +136,9 @@ CONFIG_SND_SOC_ROCKCHIP_SPDIF=m
 
 # Video
 CONFIG_VIDEO_ROCKCHIP_RGA=m
+# RKVENC (VEPU540) H.264 encoder.  The module is named rockchip-rkvenc.ko
+# (composite object), see drivers/media/platform/rockchip/rkvenc/Makefile.
+CONFIG_VIDEO_ROCKCHIP_RKVENC=m
 
 # Reboot / Power off
 # The RK809 PMIC provides the system power-off handler (rk8xx-core.c:

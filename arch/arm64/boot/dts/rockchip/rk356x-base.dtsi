@@ -616,6 +616,52 @@
 		#iommu-cells = <0>;
 	};
 
+	rkvenc: video-codec@fdf40000 {
+		compatible = "rockchip,rk3568-rkvenc";
+		reg = <0x0 0xfdf40000 0x0 0x400>;
+		interrupts = <GIC_SPI 140 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru ACLK_RKVENC>, <&cru HCLK_RKVENC>,
+			 <&cru CLK_RKVENC_CORE>;
+		clock-names = "axi", "ahb", "core";
+		assigned-clocks = <&cru ACLK_RKVENC>, <&cru CLK_RKVENC_CORE>;
+		assigned-clock-rates = <297000000>, <297000000>;
+		resets = <&cru SRST_A_RKVENC>, <&cru SRST_H_RKVENC>,
+			 <&cru SRST_RKVENC_CORE>;
+		reset-names = "axi", "ahb", "core";
+		iommus = <&rkvenc_mmu>;
+		power-domains = <&power RK3568_PD_RKVENC>;
+		operating-points-v2 = <&rkvenc_opp_table>;
+		#cooling-cells = <2>;
+		status = "disabled";
+	};
+
+	rkvenc_mmu: iommu@fdf40f00 {
+		compatible = "rockchip,rk3568-iommu";
+		reg = <0x0 0xfdf40f00 0x0 0x40>, <0x0 0xfdf40f40 0x0 0x40>;
+		interrupts = <GIC_SPI 141 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cru ACLK_RKVENC>, <&cru HCLK_RKVENC>;
+		clock-names = "aclk", "iface";
+		rockchip,disable-mmu-reset;
+		power-domains = <&power RK3568_PD_RKVENC>;
+		#iommu-cells = <0>;
+		status = "disabled";
+	};
+
+	rkvenc_opp_table: rkvenc-opp-table {
+		compatible = "operating-points-v2";
+
+		opp-297000000 {
+			opp-hz = /bits/ 64 <297000000>;
+			opp-microvolt = <900000>;
+		};
+
+		opp-400000000 {
+			opp-hz = /bits/ 64 <400000000>;
+			opp-microvolt = <950000>;
+		};
+	};
+
 	sdmmc2: mmc@fe000000 {
 		compatible = "rockchip,rk3568-dw-mshc", "rockchip,rk3288-dw-mshc";
 		reg = <0x0 0xfe000000 0x0 0x4000>;

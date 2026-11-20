@@ -23,6 +23,7 @@
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-event.h>
 #include <media/v4l2-ioctl.h>
+
 #include <media/v4l2-mem2mem.h>
 #include <media/videobuf2-dma-contig.h>
 
@@ -42,8 +43,9 @@ struct rkvenc_fmt {
 	u8 num_planes;
 };
 
-/* OUTPUT (raw) formats: the engine only understands NV12. */
+/* OUTPUT (raw) formats: NV12/NV12M，或交给硬件 CSC 的 RGBA。 */
 static const struct rkvenc_fmt rkvenc_output_fmts[] = {
+	{ V4L2_PIX_FMT_ABGR32, 1 },
 	{ V4L2_PIX_FMT_NV12, 1 },
 	{ V4L2_PIX_FMT_NV12M, 2 },
 };
@@ -224,6 +226,10 @@ static u32 rkvenc_output_plane_size(struct rkvenc_ctx *ctx, unsigned int plane)
 	u32 bpl = ctx->bytesperline;
 	u32 h = ctx->height;
 
+	/* RGBA_8888 是单平面 4 字节/像素，色度由硬件 CSC 生成。 */
+	if (ctx->src_fourcc == V4L2_PIX_FMT_ABGR32)
+		return bpl * h;
+
 	/* NV12: luma + interleaved chroma share the buffer; the chroma
 	 * starts at bpl * h. NV12M: two distinct planes. */
 	if (ctx->src_num_planes == 1)
@@ -322,11 +328,19 @@ static void rkvenc_buf_queue(struct vb2_buffer *vb)
 			if (vaddr) {
 				rkvenc_ensure_header(ctx);
 				if (rkvenc_copy_headers(ctx, vaddr,
-							vb2_plane_size(vb, 0)) < 0)
+							vb2_plane_size(vb, 0)) < 0) {
 					vb2_set_plane_payload(vb, 0, 0);
-				else
+				} else {
 					vb2_set_plane_payload(vb, 0,
 							     ctx->hdr_len);
+					/* 该缓冲之后还会被硬件复用，先把 CPU
+					 * 的写入同步出去，避免脏行延迟回写
+					 * 覆盖后续帧的码流。 */
+					dma_sync_single_for_device(
+						ctx->dev->dev,
+						vb2_dma_contig_plane_dma_addr(vb, 0),
+						ctx->hdr_len, DMA_TO_DEVICE);
+				}
 			} else {
 				vb2_set_plane_payload(vb, 0, 0);
 			}
@@ -433,7 +447,6 @@ static void rkvenc_device_run(void *priv)
 	u8 qp;
 	bool idr;
 	u32 hdr_len = 0;
-	u8 *vaddr;
 	int ret;
 
 	dev->job_ctx = ctx;
@@ -462,22 +475,23 @@ static void rkvenc_device_run(void *priv)
 	if (idr)
 		rkvenc_refresh_header(ctx);
 
-	/* JOINED_WITH_1ST_FRAME: prepend the parameter sets to the first
-	 * (or, with PREPEND_SPSPPS_TO_IDR, every requested) IDR. */
+	/*
+	 * JOINED_WITH_1ST_FRAME: 参数集要拼在码流前面，但**不能**在这里写进
+	 * capture 缓冲。这块内存同时被硬件 DMA 写：CPU 侧一次 35 字节的拷贝
+	 * 会把整条 64 字节 cache line 弄脏，而这行脏数据可能在硬件写完切片
+	 * 之后才被回写，从而把硬件刚写好的起始码和 slice header 覆盖成 0
+	 * （实测表现为 IDR 包只剩 SPS+PPS，解码器报 Invalid data）。
+	 *
+	 * 因此这里只记录需要拼接的长度，真正的拷贝放到 job 完成之后
+	 * （rkvenc_finish_job -> rkvenc_prepend_headers），让 CPU 成为最后
+	 * 一个写这块内存的人。
+	 */
 	if (ctx->c.header_mode ==
 		V4L2_MPEG_VIDEO_HEADER_MODE_JOINED_WITH_1ST_FRAME &&
 	    idr && (!ctx->joined_header_done || ctx->c.prepend_spspps)) {
-		vaddr = vb2_plane_vaddr(&dst->vb2_buf, 0);
-		if (vaddr) {
-			if (rkvenc_copy_headers(ctx, vaddr,
-						vb2_plane_size(&dst->vb2_buf, 0)) >= 0) {
-				hdr_len = ctx->hdr_len;
-				ctx->joined_header_done = true;
-			}
-		} else {
-			dev_warn_once(dev->dev,
-				      "JOINED header needs an MMAP capture buffer\n");
-		}
+		ctx->joined_header_done = true;
+		hdr_len = min_t(u32, ctx->hdr_len,
+				vb2_plane_size(&dst->vb2_buf, 0));
 	}
 	ctx->cur_prepend = hdr_len;
 
@@ -488,19 +502,27 @@ static void rkvenc_device_run(void *priv)
 	f.src.height = ctx->height;
 	f.src.stride[0] = ctx->bytesperline;
 	f.src.stride[1] = ctx->bytesperline;
+	f.src.rgb = ctx->src_fourcc == V4L2_PIX_FMT_ABGR32;
+	f.src.rbuv_swap = f.src.rgb;
 	f.src.plane[0] = lower_32_bits(
 		vb2_dma_contig_plane_dma_addr(&src->vb2_buf, 0));
-	if (ctx->src_num_planes == 1)
+	if (f.src.rgb) {
+		/* RGB 单平面：色度由硬件 CSC 生成，不使用 ADR_SRC1/2。 */
+		f.src.plane[1] = 0;
+		f.src.plane[2] = 0;
+	} else if (ctx->src_num_planes == 1) {
 		f.src.plane[1] = f.src.plane[0] + ctx->bytesperline * ctx->height;
-	else
+	} else {
 		f.src.plane[1] = lower_32_bits(
 			vb2_dma_contig_plane_dma_addr(&src->vb2_buf, 1) +
 			src->vb2_buf.planes[1].data_offset);
+	}
 
 	f.bs.base = lower_32_bits(
 		vb2_dma_contig_plane_dma_addr(&dst->vb2_buf, 0));
-	f.bs.size = vb2_plane_size(&dst->vb2_buf, 0);
-	f.bs.offset = hdr_len;
+	/* 拼接参数集需要一个 hdr_len 的头部空间，硬件只能写它之后的部分。 */
+	f.bs.size = vb2_plane_size(&dst->vb2_buf, 0) - hdr_len;
+	f.bs.offset = 0;
 
 	/* Slot ping-pong (design/02 12.2): write to cur, reference last
 	 * (or cur for an IDR); gop_commit flips them after a good frame. */
@@ -801,6 +823,16 @@ static void rkvenc_try_fmt_vid_out(struct rkvenc_ctx *ctx, struct v4l2_format *f
 	pix->height = clamp(round_up(pix->height, 2), 16, ctx->dev->max_height);
 	pix->num_planes = fmt->num_planes;
 
+	if (fmt->fourcc == V4L2_PIX_FMT_ABGR32) {
+		/* Android RGBA_8888：每像素 4 字节，单平面。 */
+		bpl = pix->plane_fmt[0].bytesperline;
+		if (bpl < pix->width * 4)
+			bpl = pix->width * 4;
+		pix->plane_fmt[0].bytesperline = bpl;
+		pix->plane_fmt[0].sizeimage = bpl * pix->height;
+		return;
+	}
+
 	bpl = ALIGN(pix->width, 16);
 	pix->plane_fmt[0].bytesperline = bpl;
 	if (fmt->num_planes == 2) {
@@ -963,6 +995,63 @@ static int rkvenc_g_parm(struct file *file, void *priv,
 	return 0;
 }
 
+/*
+ * 有状态 V4L2 编码客户端（如 v4l2_codec2）在 S_FMT 之后会用 VIDIOC_S_SELECTION
+ * 声明可见矩形，用来表达"协商尺寸里真正要编码的区域"。若驱动不支持该 ioctl，
+ * 客户端会退到 VIDIOC_S_CROP，两者都失败时直接放弃创建编码器。
+ *
+ * 本驱动与硬件都按 S_FMT 协商出的尺寸出流，编码前没有真实的裁剪级。因此这里
+ * 只接受与当前编码尺寸完全一致的可见矩形；更小的矩形会被明确拒绝，避免出现
+ * 声明尺寸与实际码流尺寸不一致的静默错误。
+ */
+static int rkvenc_g_selection(struct file *file, void *priv,
+			      struct v4l2_selection *s)
+{
+	struct rkvenc_ctx *ctx = fh_to_rkvenc_ctx(file->private_data);
+
+	if (!V4L2_TYPE_IS_OUTPUT(s->type))
+		return -EINVAL;
+
+	switch (s->target) {
+	case V4L2_SEL_TGT_CROP:
+	case V4L2_SEL_TGT_CROP_DEFAULT:
+	case V4L2_SEL_TGT_CROP_BOUNDS:
+		if (!ctx->width || !ctx->height)
+			return -EINVAL;
+		s->r.left = 0;
+		s->r.top = 0;
+		s->r.width = ctx->width;
+		s->r.height = ctx->height;
+		return 0;
+	default:
+		return -EINVAL;
+	}
+}
+
+static int rkvenc_s_selection(struct file *file, void *priv,
+			      struct v4l2_selection *s)
+{
+	struct rkvenc_ctx *ctx = fh_to_rkvenc_ctx(file->private_data);
+
+	if (!V4L2_TYPE_IS_OUTPUT(s->type))
+		return -EINVAL;
+	if (s->target != V4L2_SEL_TGT_CROP)
+		return -EINVAL;
+	if (!ctx->width || !ctx->height)
+		return -EINVAL;
+
+	if (s->r.left || s->r.top ||
+	    s->r.width != ctx->width || s->r.height != ctx->height) {
+		dev_warn_ratelimited(ctx->dev->dev,
+				     "cropping not supported: %ux%u+%d+%d, coded size %ux%u\n",
+				     s->r.width, s->r.height, s->r.left, s->r.top,
+				     ctx->width, ctx->height);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
 static int rkvenc_vidioc_encoder_cmd(struct file *file, void *priv,
 				     struct v4l2_encoder_cmd *cmd)
 {
@@ -1088,6 +1177,9 @@ static const struct v4l2_ioctl_ops rkvenc_v4l2_ioctl_ops = {
 
 	.vidioc_s_parm = rkvenc_s_parm,
 	.vidioc_g_parm = rkvenc_g_parm,
+
+	.vidioc_g_selection = rkvenc_g_selection,
+	.vidioc_s_selection = rkvenc_s_selection,
 
 	.vidioc_encoder_cmd = rkvenc_vidioc_encoder_cmd,
 	.vidioc_try_encoder_cmd = v4l2_m2m_ioctl_try_encoder_cmd,

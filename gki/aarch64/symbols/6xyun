@@ -918,6 +918,42 @@
   __video_register_device
   video_unregister_device
 
+# required by rockchip-rkvenc.ko
+  dev_pm_opp_get_freq_indexed
+  dev_pm_qos_add_request
+  dev_pm_qos_remove_request
+  dev_pm_qos_update_request
+  devfreq_add_device
+  devfreq_remove_device
+  __devm_reset_control_bulk_get
+  media_device_cleanup
+  media_device_init
+  __media_device_register
+  media_device_unregister
+  reset_control_bulk_assert
+  reset_control_bulk_deassert
+  thermal_cooling_device_unregister
+  thermal_of_cooling_device_register
+  update_devfreq
+  v4l2_ctrl_find
+  v4l2_ctrl_new_std_menu
+  __v4l2_ctrl_s_ctrl
+  v4l2_m2m_buf_done_and_job_finish
+  v4l2_m2m_ioctl_encoder_cmd
+  v4l2_m2m_ioctl_try_encoder_cmd
+  v4l2_m2m_last_buffer_done
+  v4l2_m2m_register_media_controller
+  v4l2_m2m_resume
+  v4l2_m2m_suspend
+  v4l2_m2m_try_schedule
+  v4l2_m2m_unregister_media_controller
+  v4l2_m2m_update_stop_streaming_state
+  vb2_dma_contig_memops
+  vb2_dma_contig_set_max_seg_size
+  vb2_plane_vaddr
+  vb2_queue_error
+  video_device_release_empty
+
 # required by rockchip_saradc.ko
   devm_iio_device_alloc
   __devm_iio_device_register

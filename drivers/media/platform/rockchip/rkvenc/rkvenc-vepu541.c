@@ -115,10 +115,14 @@ static void rkvenc_buffers_build(const struct rkvenc_frame *f,
 {
 	const struct rkvenc_src *src = &f->src;
 	const struct rkvenc_bs *bs = &f->bs;
+	u32 cfmt = src->rgb ? RKVENC_SRC_FMT_CFMT_BGRA8888 :
+			      RKVENC_SRC_FMT_CFMT_NV12;
+	u32 src_fmt = FIELD_PREP(RKVENC_SRC_FMT_CFMT, cfmt);
 
-	rkvenc_img_l1(img, RKVENC_SRC_FMT,
-		      FIELD_PREP(RKVENC_SRC_FMT_CFMT,
-				 RKVENC_SRC_FMT_CFMT_NV12));
+	if (src->rgb && src->rbuv_swap)
+		src_fmt |= RKVENC_SRC_FMT_RBUV_SWAP;
+
+	rkvenc_img_l1(img, RKVENC_SRC_FMT, src_fmt);
 	rkvenc_img_l1(img, RKVENC_SRC_PROC, RKVENC_SRC_PROC_TXA_EN);
 	rkvenc_img_l1(img, RKVENC_SRC_STRID,
 		      FIELD_PREP(RKVENC_SRC_STRID_STRD0, src->stride[0]) |
@@ -126,6 +130,29 @@ static void rkvenc_buffers_build(const struct rkvenc_frame *f,
 	rkvenc_img_l1(img, RKVENC_ADR_SRC0, src->plane[0]);
 	rkvenc_img_l1(img, RKVENC_ADR_SRC1, src->plane[1]);
 	rkvenc_img_l1(img, RKVENC_ADR_SRC2, src->plane[2]);
+
+	if (src->rgb) {
+		/*
+		 * BT.601 full-range RGB -> limited-range YUV，系数取自 MPP
+		 * vepu_rgb2limit_yuv_cfg_set[0]。
+		 */
+		rkvenc_img_l1(img, RKVENC_CSC_WGT_Y,
+			      FIELD_PREP(RKVENC_CSC_WGT_B2Y, rkvenc_s2u(25, 9)) |
+			      FIELD_PREP(RKVENC_CSC_WGT_G2Y, rkvenc_s2u(129, 9)) |
+			      FIELD_PREP(RKVENC_CSC_WGT_R2Y, rkvenc_s2u(66, 9)));
+		rkvenc_img_l1(img, RKVENC_CSC_WGT_U,
+			      FIELD_PREP(RKVENC_CSC_WGT_B2U, rkvenc_s2u(112, 9)) |
+			      FIELD_PREP(RKVENC_CSC_WGT_G2U, rkvenc_s2u(-74, 9)) |
+			      FIELD_PREP(RKVENC_CSC_WGT_R2U, rkvenc_s2u(-38, 9)));
+		rkvenc_img_l1(img, RKVENC_CSC_WGT_V,
+			      FIELD_PREP(RKVENC_CSC_WGT_B2V, rkvenc_s2u(-18, 9)) |
+			      FIELD_PREP(RKVENC_CSC_WGT_G2V, rkvenc_s2u(-94, 9)) |
+			      FIELD_PREP(RKVENC_CSC_WGT_R2V, rkvenc_s2u(112, 9)));
+		rkvenc_img_l1(img, RKVENC_CSC_OFST,
+			      FIELD_PREP(RKVENC_CSC_OFST_Y, 16) |
+			      FIELD_PREP(RKVENC_CSC_OFST_U, 128) |
+			      FIELD_PREP(RKVENC_CSC_OFST_V, 128));
+	}
 
 	if (f->referenced) {
 		rkvenc_img_l1(img, RKVENC_ADR_RFPW_H, f->recon.rfp_hdr);

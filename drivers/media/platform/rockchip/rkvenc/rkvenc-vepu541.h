@@ -24,6 +24,10 @@ struct rkvenc_src {
 	u32 stride[2];
 	u32 width;
 	u32 height;
+	/* RGB 输入：色度由硬件 CSC 生成，plane[1]/[2] 不使用。 */
+	bool rgb;
+	/* Android RGBA_8888 与 VEPU 的 BGRA8888 相差一次 R/B 交换。 */
+	bool rbuv_swap;
 };
 
 struct rkvenc_bs {
