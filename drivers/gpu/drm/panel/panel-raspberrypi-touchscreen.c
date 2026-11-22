@@ -41,6 +41,7 @@
  * device with a drm_panel.
  */
 
+#include <linux/backlight.h>
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/i2c.h>
@@ -192,22 +193,44 @@ struct rpi_touchscreen {
 	struct drm_panel base;
 	struct mipi_dsi_device *dsi;
 	struct i2c_client *i2c;
+	struct backlight_device *backlight;
 };
 
 static const struct drm_display_mode rpi_touchscreen_modes[] = {
 	{
-		/* Modeline comes from the Raspberry Pi firmware, with HFP=1
-		 * plugged in and clock re-computed from that.
+		/*
+		 * Modeline comes from the Raspberry Pi firmware, with HFP=1
+		 * plugged in.  The Raspberry Pi 7" panel needs the shorter
+		 * horizontal total (HBP=1); the pixel clock is kept at the
+		 * firmware value and the vertical total is stretched below to
+		 * bring the refresh rate back to the 59.94 Hz class.
+		 *
+		 * The unmodified firmware total (849, 60 Hz) shifts the picture
+		 * horizontally and rotates the colour channels on this panel,
+		 * and the bridge is configured by its ATtiny firmware so the
+		 * host cannot compensate there.  Keep 804, which is also what
+		 * the U-Boot panel driver uses, so both stages drive the same
+		 * timing.  The cost is that the DW DSI host keeps only 12 byte
+		 * clocks of horizontal blanking (10 per component is the
+		 * minimum), which shows as the first 2-4 lines of the frame
+		 * repeated at the bottom of the panel.
 		 */
 		.clock = 25979400 / 1000,
 		.hdisplay = 800,
 		.hsync_start = 800 + 1,
 		.hsync_end = 800 + 1 + 2,
-		.htotal = 800 + 1 + 2 + 46,
+		.htotal = 800 + 1 + 2 + 1,
 		.vdisplay = 480,
 		.vsync_start = 480 + 7,
 		.vsync_end = 480 + 7 + 2,
-		.vtotal = 480 + 7 + 2 + 21,
+		/*
+		 * 539 lines instead of the firmware 510: 25,979,400 / (804 x
+		 * 539) = 59.95 Hz, i.e. the 59.94 Hz class any application
+		 * expects, while htotal and the pixel clock stay at the values
+		 * this panel actually accepts.  The extra vertical blanking is
+		 * harmless; unlike htotal it does not move the picture.
+		 */
+		.vtotal = 480 + 7 + 2 + 50,
 	},
 };
 
@@ -221,14 +244,16 @@ static int rpi_touchscreen_i2c_read(struct rpi_touchscreen *ts, u8 reg)
 	return i2c_smbus_read_byte_data(ts->i2c, reg);
 }
 
-static void rpi_touchscreen_i2c_write(struct rpi_touchscreen *ts,
-				      u8 reg, u8 val)
+static int rpi_touchscreen_i2c_write(struct rpi_touchscreen *ts,
+				     u8 reg, u8 val)
 {
 	int ret;
 
 	ret = i2c_smbus_write_byte_data(ts->i2c, reg, val);
 	if (ret)
 		dev_err(&ts->i2c->dev, "I2C write failed: %d\n", ret);
+
+	return ret;
 }
 
 static int rpi_touchscreen_write(struct rpi_touchscreen *ts, u16 reg, u32 val)
@@ -241,17 +266,51 @@ static int rpi_touchscreen_write(struct rpi_touchscreen *ts, u16 reg, u32 val)
 		val >> 16,
 		val >> 24,
 	};
+	ssize_t ret;
 
-	mipi_dsi_generic_write(ts->dsi, msg, sizeof(msg));
+	ret = mipi_dsi_generic_write(ts->dsi, msg, sizeof(msg));
+	if (ret < 0)
+		dev_err(&ts->i2c->dev,
+			"DSI write of register 0x%04x failed: %zd\n",
+			reg, ret);
 
-	return 0;
+	return ret;
 }
+
+/*
+ * The backlight is driven by the ATtiny on the bridge board and controlled over
+ * I2C (REG_PWM).  Register it as a standard backlight device so the framework
+ * and recovery have a brightness/max_brightness interface; recovery would
+ * otherwise disable its screensaver and log "Failed to read max brightness".
+ * Panels that ignore the PWM value (some clones) simply do not dim, the driver
+ * stays honest and still writes through whatever userspace requested.
+ */
+static int rpi_touchscreen_backlight_update(struct backlight_device *bl)
+{
+	struct rpi_touchscreen *ts = bl_get_data(bl);
+	int val = backlight_get_brightness(bl);
+
+	return rpi_touchscreen_i2c_write(ts, REG_PWM, (u8)val);
+}
+
+static int rpi_touchscreen_backlight_get(struct backlight_device *bl)
+{
+	struct rpi_touchscreen *ts = bl_get_data(bl);
+	int val = rpi_touchscreen_i2c_read(ts, REG_PWM);
+
+	return val < 0 ? 0 : val;
+}
+
+static const struct backlight_ops rpi_touchscreen_bl_ops = {
+	.update_status = rpi_touchscreen_backlight_update,
+	.get_brightness = rpi_touchscreen_backlight_get,
+};
 
 static int rpi_touchscreen_disable(struct drm_panel *panel)
 {
 	struct rpi_touchscreen *ts = panel_to_ts(panel);
 
-	rpi_touchscreen_i2c_write(ts, REG_PWM, 0);
+	backlight_disable(ts->backlight);
 
 	rpi_touchscreen_i2c_write(ts, REG_POWERON, 0);
 	udelay(1);
@@ -274,7 +333,13 @@ static int rpi_touchscreen_prepare(struct drm_panel *panel)
 	for (i = 0; i < 100; i++) {
 		if (rpi_touchscreen_i2c_read(ts, REG_PORTB) & 1)
 			break;
+		msleep(10);
 	}
+
+	if (i == 100)
+		dev_err(&ts->i2c->dev,
+			"panel power on timed out (PORTB=0x%02x)\n",
+			rpi_touchscreen_i2c_read(ts, REG_PORTB));
 
 	rpi_touchscreen_write(ts, DSI_LANEENABLE,
 			      DSI_LANEENABLE_CLOCK |
@@ -301,8 +366,8 @@ static int rpi_touchscreen_enable(struct drm_panel *panel)
 {
 	struct rpi_touchscreen *ts = panel_to_ts(panel);
 
-	/* Turn on the backlight. */
-	rpi_touchscreen_i2c_write(ts, REG_PWM, 255);
+	/* Restore the brightness requested through the backlight device. */
+	backlight_enable(ts->backlight);
 
 	/* Default to the same orientation as the closed source
 	 * firmware used for the panel.  Runtime rotation
@@ -366,6 +431,11 @@ static int rpi_touchscreen_probe(struct i2c_client *i2c)
 	struct rpi_touchscreen *ts;
 	struct device_node *endpoint, *dsi_host_node;
 	struct mipi_dsi_host *host;
+	struct backlight_properties props = {
+		.type = BACKLIGHT_RAW,
+		.max_brightness = 255,
+		.brightness = 255,
+	};
 	int ver;
 	struct mipi_dsi_device_info info = {
 		.type = RPI_DSI_DRIVER_NAME,
@@ -401,6 +471,18 @@ static int rpi_touchscreen_probe(struct i2c_client *i2c)
 
 	/* Turn off at boot, so we can cleanly sequence powering on. */
 	rpi_touchscreen_i2c_write(ts, REG_POWERON, 0);
+
+	/*
+	 * Register the backlight only after the controller has been identified,
+	 * so an unknown bridge does not leave a stray backlight device behind.
+	 * The panel is still powered down here, so the initial brightness is
+	 * only remembered; enable() applies it through backlight_enable().
+	 */
+	ts->backlight = devm_backlight_device_register(dev, "rpi_touchscreen",
+						       dev, ts, &rpi_touchscreen_bl_ops,
+						       &props);
+	if (IS_ERR(ts->backlight))
+		return PTR_ERR(ts->backlight);
 
 	/* Look up the DSI host.  It needs to probe before we do. */
 	endpoint = of_graph_get_endpoint_by_regs(dev->of_node, 0, -1);

@@ -141,6 +141,29 @@ static void rockchip_iommu_cleanup(struct drm_device *drm_dev)
 	iommu_domain_free(private->domain);
 }
 
+/*
+ * Some connectors (most notably a DSI panel bridge) have no HPD source and
+ * are not probed by any in-kernel DRM client when DRM_CLIENT_DEFAULT is
+ * empty.  Userspace that enumerates connectors before becoming DRM master
+ * then sees them as "unknown" with no modes and skips them.  Probe any
+ * connector that still has no modes once the device is registered.
+ */
+static void rockchip_drm_probe_connectors(struct drm_device *drm_dev)
+{
+	struct drm_connector_list_iter conn_iter;
+	struct drm_connector *connector;
+
+	mutex_lock(&drm_dev->mode_config.mutex);
+	drm_connector_list_iter_begin(drm_dev, &conn_iter);
+	drm_for_each_connector_iter(connector, &conn_iter) {
+		if (list_empty(&connector->modes))
+			drm_helper_probe_single_connector_modes(connector,
+							       0, 0);
+	}
+	drm_connector_list_iter_end(&conn_iter);
+	mutex_unlock(&drm_dev->mode_config.mutex);
+}
+
 static int rockchip_drm_bind(struct device *dev)
 {
 	struct drm_device *drm_dev;
@@ -199,6 +222,7 @@ static int rockchip_drm_bind(struct device *dev)
 		goto err_kms_helper_poll_fini;
 
 	drm_client_setup(drm_dev, NULL);
+	rockchip_drm_probe_connectors(drm_dev);
 
 	return 0;
 err_kms_helper_poll_fini:

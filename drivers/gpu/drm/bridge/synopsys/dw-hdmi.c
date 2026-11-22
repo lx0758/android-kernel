@@ -1723,8 +1723,7 @@ void dw_hdmi_phy_setup_hpd(struct dw_hdmi *hdmi, void *data)
 	/* Clear and unmute interrupts. */
 	hdmi_writeb(hdmi, HDMI_IH_PHY_STAT0_HPD | HDMI_IH_PHY_STAT0_RX_SENSE,
 		    HDMI_IH_PHY_STAT0);
-	hdmi_writeb(hdmi, ~(HDMI_IH_PHY_STAT0_HPD | HDMI_IH_PHY_STAT0_RX_SENSE),
-		    HDMI_IH_MUTE_PHY_STAT0);
+	hdmi_writeb(hdmi, ~HDMI_IH_PHY_STAT0_HPD, HDMI_IH_MUTE_PHY_STAT0);
 }
 EXPORT_SYMBOL_GPL(dw_hdmi_phy_setup_hpd);
 
@@ -3044,8 +3043,21 @@ static irqreturn_t dw_hdmi_hardirq(int irq, void *dev_id)
 
 	intr_stat = hdmi_readb(hdmi, HDMI_IH_PHY_STAT0);
 	if (intr_stat) {
+		/*
+		 * Mask PHY interrupts while the threaded handler runs. Only HPD
+		 * is relevant for hotplug; RX_SENSE feedback from some sinks
+		 * oscillates when the TMDS link is not terminated and can storm
+		 * this shared IRQ (observed as ~100k interrupts/s on RK3566).
+		 */
 		hdmi_writeb(hdmi, ~0, HDMI_IH_MUTE_PHY_STAT0);
-		return IRQ_WAKE_THREAD;
+
+		if (intr_stat & HDMI_IH_PHY_STAT0_HPD)
+			return IRQ_WAKE_THREAD;
+
+		/* Drop RX_SENSE events and leave them muted. */
+		hdmi_writeb(hdmi, intr_stat, HDMI_IH_PHY_STAT0);
+		hdmi_writeb(hdmi, ~HDMI_IH_PHY_STAT0_HPD,
+			    HDMI_IH_MUTE_PHY_STAT0);
 	}
 
 	return ret;
@@ -3111,23 +3123,37 @@ static irqreturn_t dw_hdmi_irq(int irq, void *dev_id)
 	 * power on the phy as HPD may be toggled by the sink to merely
 	 * ask the source to re-read the EDID.
 	 */
-	if (intr_stat &
-	    (HDMI_IH_PHY_STAT0_RX_SENSE | HDMI_IH_PHY_STAT0_HPD)) {
-		dw_hdmi_setup_rx_sense(hdmi,
-				       phy_stat & HDMI_PHY_HPD,
-				       phy_stat & HDMI_PHY_RX_SENSE);
+	if (intr_stat & HDMI_IH_PHY_STAT0_HPD) {
+		/*
+		 * While the bridge is disabled the PHY is powered down, and the
+		 * HPD/RX_SENSE comparators live in the PHY: HDMI_PHY_STAT0 then
+		 * reads 0 no matter whether the sink is still connected. Acting
+		 * on that reading makes the display stack tear the connector
+		 * down on every screen-off and rediscover it only after the PHY
+		 * is powered again, which surfaces as "HDMI must be replugged
+		 * after resume". Keep the software connection state (including
+		 * rxsense) untouched in this window and let the next enable
+		 * sample the sink again.
+		 */
+		if (hdmi->disabled && !(phy_stat & HDMI_PHY_HPD)) {
+			dev_dbg(hdmi->dev, "HPD low while PHY is off, ignored\n");
+		} else {
+			dw_hdmi_setup_rx_sense(hdmi,
+					       phy_stat & HDMI_PHY_HPD,
+					       phy_stat & HDMI_PHY_RX_SENSE);
 
-		if ((phy_stat & (HDMI_PHY_RX_SENSE | HDMI_PHY_HPD)) == 0) {
-			mutex_lock(&hdmi->cec_notifier_mutex);
-			cec_notifier_phys_addr_invalidate(hdmi->cec_notifier);
-			mutex_unlock(&hdmi->cec_notifier_mutex);
+			if ((phy_stat & (HDMI_PHY_RX_SENSE | HDMI_PHY_HPD)) == 0) {
+				mutex_lock(&hdmi->cec_notifier_mutex);
+				cec_notifier_phys_addr_invalidate(hdmi->cec_notifier);
+				mutex_unlock(&hdmi->cec_notifier_mutex);
+			}
+
+			if (phy_stat & HDMI_PHY_HPD)
+				status = connector_status_connected;
+
+			if (!(phy_stat & (HDMI_PHY_HPD | HDMI_PHY_RX_SENSE)))
+				status = connector_status_disconnected;
 		}
-
-		if (phy_stat & HDMI_PHY_HPD)
-			status = connector_status_connected;
-
-		if (!(phy_stat & (HDMI_PHY_HPD | HDMI_PHY_RX_SENSE)))
-			status = connector_status_disconnected;
 	}
 
 	if (status != connector_status_unknown) {
@@ -3142,8 +3168,7 @@ static irqreturn_t dw_hdmi_irq(int irq, void *dev_id)
 	}
 
 	hdmi_writeb(hdmi, intr_stat, HDMI_IH_PHY_STAT0);
-	hdmi_writeb(hdmi, ~(HDMI_IH_PHY_STAT0_HPD | HDMI_IH_PHY_STAT0_RX_SENSE),
-		    HDMI_IH_MUTE_PHY_STAT0);
+	hdmi_writeb(hdmi, ~HDMI_IH_PHY_STAT0_HPD, HDMI_IH_MUTE_PHY_STAT0);
 
 	return IRQ_HANDLED;
 }

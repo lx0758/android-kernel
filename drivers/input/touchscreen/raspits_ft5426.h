@@ -1,0 +1,12 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+#ifndef _RASPITS_FT5426_H_
+#define _RASPITS_FT5426_H_
+
+#define FT5426_MAX_TOUCH_POINTS	1
+#define FT5426_POLL_INTERVAL_MS	17
+
+#define FT5426_REG_TD_STATUS	0x02
+#define FT5426_REG_P1_XH	0x03
+#define FT5426_REG_FW_VER	0xA6
+
+#endif /* _RASPITS_FT5426_H_ */

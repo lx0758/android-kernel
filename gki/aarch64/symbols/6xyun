@@ -1443,3 +1443,33 @@
 # bitmap helpers
   __bitmap_andnot
   _find_first_bit
+
+# added for panel-raspberrypi-touchscreen (Raspberry Pi 7" DSI panel)
+  __devm_drm_panel_alloc
+  drm_display_info_set_bus_formats
+  drm_mode_duplicate
+  drm_mode_probed_add
+  drm_mode_set_name
+  drm_panel_add
+  drm_panel_remove
+  i2c_smbus_read_byte_data
+  i2c_smbus_write_byte_data
+  mipi_dsi_attach
+  mipi_dsi_detach
+  mipi_dsi_device_register_full
+  mipi_dsi_device_unregister
+  mipi_dsi_driver_register_full
+  mipi_dsi_driver_unregister
+  mipi_dsi_generic_write
+  of_find_mipi_dsi_host_by_node
+  devm_backlight_device_register
+
+# added for raspits_ft5426 (FT5426 touchscreen)
+  input_allocate_device
+  input_mt_init_slots
+  input_mt_report_pointer_emulation
+  input_mt_report_slot_state
+  input_set_abs_params
+  input_unregister_device
+  touchscreen_parse_properties
+  touchscreen_report_pos
