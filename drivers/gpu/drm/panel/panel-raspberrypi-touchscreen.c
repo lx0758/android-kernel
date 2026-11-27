@@ -506,17 +506,23 @@ static int rpi_touchscreen_probe(struct i2c_client *i2c)
 
 	of_node_put(endpoint);
 
+	/*
+	 * Register the panel before the DSI device: mipi_dsi_device_register_full()
+	 * probes the DSI client synchronously, and dw_mipi_dsi_host_attach() builds
+	 * the panel bridge by looking the panel up in the DRM panel registry.  If
+	 * the panel is not registered yet, the attach fails with -EPROBE_DEFER,
+	 * which is only retried at the end of the initcalls (late_initcall), and
+	 * delays display bring-up by several hundred milliseconds.
+	 */
+	drm_panel_add(&ts->base);
+
 	ts->dsi = mipi_dsi_device_register_full(host, &info);
 	if (IS_ERR(ts->dsi)) {
 		dev_err(dev, "DSI device registration failed: %ld\n",
 			PTR_ERR(ts->dsi));
+		drm_panel_remove(&ts->base);
 		return PTR_ERR(ts->dsi);
 	}
-
-	/* This appears last, as it's what will unblock the DSI host
-	 * driver's component bind function.
-	 */
-	drm_panel_add(&ts->base);
 
 	return 0;
 
@@ -538,6 +544,8 @@ static void rpi_touchscreen_remove(struct i2c_client *i2c)
 
 static int rpi_touchscreen_dsi_probe(struct mipi_dsi_device *dsi)
 {
+	struct device_node *panel_node;
+	struct drm_panel *panel;
 	int ret;
 
 	dsi->mode_flags = (MIPI_DSI_MODE_VIDEO |
@@ -545,6 +553,18 @@ static int rpi_touchscreen_dsi_probe(struct mipi_dsi_device *dsi)
 			   MIPI_DSI_MODE_LPM);
 	dsi->format = MIPI_DSI_FMT_RGB888;
 	dsi->lanes = 1;
+
+	/*
+	 * The panel is registered before the DSI device is created, so it can be
+	 * resolved here.  Store it before attaching: mipi_dsi_attach() triggers
+	 * the DSI host component bind, which may light up the display right away,
+	 * and the panel callbacks need a valid DSI device.
+	 */
+	panel_node = of_graph_get_port_parent(dsi->dev.of_node);
+	panel = panel_node ? of_drm_find_panel(panel_node) : NULL;
+	of_node_put(panel_node);
+	if (!IS_ERR_OR_NULL(panel))
+		panel_to_ts(panel)->dsi = dsi;
 
 	ret = mipi_dsi_attach(dsi);
 

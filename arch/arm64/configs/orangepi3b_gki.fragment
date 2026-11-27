@@ -34,6 +34,9 @@
 # CONFIG_SERIAL_8250_RUNTIME_UARTS=4
 
 # Core features
+# NOTE: RK809 PMIC 的 MFD/regulator 已内建到 GKI（见 gki_defconfig），否则
+# HDMI 组件的 avdd-0v9/avdd-1v8 电源要等到 ~3s 模块加载后才可用，整个 DRM
+# 主设备（含 DSI）会一直 deferred probe，屏幕到 3s 才亮。
 CONFIG_COMMON_CLK_RK808=m
 # CONFIG_CPUFREQ_DT 是模块，驱动本体随 vendor_boot 加载；但 "cpufreq-dt"
 # 平台设备由 CONFIG_CPUFREQ_DT_PLATDEV 创建，该符号是 bool，在本 mixed build
@@ -47,8 +50,6 @@ CONFIG_COMMON_CLK_RK808=m
 # 缺它时 clk_get() 永久返回 -EPROBE_DEFER：cpufreq-dt 平台设备与驱动都在，
 # 但永远不绑定，/sys/devices/system/cpu/cpufreq 为空且没有任何报错。
 CONFIG_CPUFREQ_DT=m
-CONFIG_MFD_RK8XX=m
-CONFIG_MFD_RK8XX_I2C=m
 CONFIG_PHY_ROCKCHIP_PCIE=m
 CONFIG_PHY_ROCKCHIP_NANENG_COMBO_PHY=m
 CONFIG_PHY_ROCKCHIP_INNO_USB2=m
@@ -57,7 +58,6 @@ CONFIG_PWM_ROCKCHIP=m
 CONFIG_PWRSEQ_SIMPLE=m
 CONFIG_REGULATOR_FAN53555=m
 CONFIG_REGULATOR_PWM=m
-CONFIG_REGULATOR_RK808=m
 CONFIG_NVMEM_ROCKCHIP_EFUSE=m
 CONFIG_NVMEM_ROCKCHIP_OTP=m
 CONFIG_ROCKCHIP_IODOMAIN=m
@@ -66,13 +66,9 @@ CONFIG_ROCKCHIP_IODOMAIN=m
 # See the comment in drivers/thermal/rockchip_thermal.c for details.
 CONFIG_ROCKCHIP_THERMAL=m
 CONFIG_ROCKCHIP_SARADC=m
-CONFIG_ROCKCHIP_VOP2=y
 
 # Watchdog
 CONFIG_DW_WATCHDOG=m
-
-# I2C
-CONFIG_I2C_RK3X=m
 
 # Real-time clock
 CONFIG_RTC_DRV_RK808=m
@@ -97,13 +93,18 @@ CONFIG_MMC_DW_ROCKCHIP=m
 CONFIG_PHY_ROCKCHIP_EMMC=m
 
 # Display
-CONFIG_DRM_ROCKCHIP=m
-CONFIG_ROCKCHIP_ANALOGIX_DP=y
-CONFIG_ROCKCHIP_DW_HDMI=y
-CONFIG_ROCKCHIP_DW_MIPI_DSI=y
+# NOTE: 显示栈整体内建到 GKI vmlinux，目的是让 rockchipdrm + drm_log 在 ~1s 就
+# 接管屏幕，把内核启动日志直接画出来，而不再依赖 U-Boot 帧缓冲跨 3 秒交接
+# （那条路径会留下 bootloader 配置过的 VOP/DSI 状态，DRM 接管时反复出现
+# POST_BUF_EMPTY / IOMMU 冲突）。
+#   CONFIG_DRM_ROCKCHIP / ROCKCHIP_VOP2 / ROCKCHIP_DW_MIPI_DSI /
+#   ROCKCHIP_DW_HDMI / DRM_PANEL_RASPBERRYPI_TOUCHSCREEN /
+#   PHY_ROCKCHIP_INNO_DSIDPHY / I2C_RK3X                              -> gki_defconfig
+#   CONFIG_DRM_SIMPLEDRM / DRM_CLIENT_LOG（bool）                     -> gki_defconfig
+# DRM_CLIENT_DEFAULT 由 Kconfig choice 自动取 "log"（fbdev 在未开
+# DRM_FBDEV_EMULATION 时不可见），不需要显式设置，显式写在 gki_defconfig 会被
+# kleaf 的 savedefconfig 一致性检查判为多余默认值。
 CONFIG_BACKLIGHT_PWM=m
-CONFIG_DRM_PANEL_RASPBERRYPI_TOUCHSCREEN=m
-CONFIG_PHY_ROCKCHIP_INNO_DSIDPHY=m
 
 # Touchscreen
 CONFIG_TOUCHSCREEN_RASPITS_FT5426=m
