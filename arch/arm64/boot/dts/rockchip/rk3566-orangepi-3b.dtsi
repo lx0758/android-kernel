@@ -721,3 +721,15 @@
 		remote-endpoint = <&hdmi_in_vp0>;
 	};
 };
+
+/*
+ * Enable the SoC True Random Number Generator (TRNG, NS side).
+ *
+ * rk356x-base.dtsi leaves it disabled, so the kernel has no hardware entropy
+ * source at boot and the CRNG is not ready until ~15s. The first blocking
+ * user (fs_mgr/libdm -> uuid_generate()) then stalls the whole boot for more
+ * than ten seconds. Keeping this enabled lets the CRNG be initialised early.
+ */
+&rng {
+	status = "okay";
+};
